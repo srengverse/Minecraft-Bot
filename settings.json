@@ -6,8 +6,8 @@
   },
 
   "server": {
-    "ip": "Srengkh.aternos.me",
-    "port": 12057,
+    "ip": "playerteam.aternos.me",
+    "port": 29443,
     "version": "1.12.2"
   },
 
