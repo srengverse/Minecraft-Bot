@@ -3,6 +3,7 @@ const Movements = require('mineflayer-pathfinder').Movements;
 const pathfinder = require('mineflayer-pathfinder').pathfinder;
 const { GoalBlock } = require('mineflayer-pathfinder').goals;
 const express = require('express');
+const fetch = require('node-fetch');
 const config = require('./settings.json');
 
 const app = express();
@@ -18,11 +19,31 @@ app.listen(port, () => {
 
 let bot;
 
+async function sendTelegram(message) {
+   if (!config.utils.telegram || !config.utils.telegram.enabled) return;
+   
+   const { token, chatId } = config.utils.telegram;
+   if (!token || !chatId || token.includes('YOUR_')) return;
+
+   const url = `https://api.telegram.org/bot${token}/sendMessage`;
+   try {
+      await fetch(url, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+            chat_id: chatId,
+            text: message,
+            parse_mode: 'HTML'
+         })
+      });
+   } catch (err) {
+      console.log(`\x1b[31m[Telegram] Error: ${err.message}\x1b[0m`);
+   }
+}
+
 function createBot() {
    console.log('[System] Initializing bot...');
-   console.log(`[System] Target Server: ${config.server.ip}:${config.server.port} (Version: ${config.server.version})`);
-
-   // Ping server before connecting
+   
    mineflayer.ping({
       host: config.server.ip,
       port: config.server.port,
@@ -30,9 +51,8 @@ function createBot() {
    }, (err, res) => {
       if (err) {
          console.log(`\x1b[31m[Ping] Error: ${err.message}\x1b[0m`);
-         console.log('\x1b[33m[Ping] Server might be offline or unreachable.\x1b[0m');
       } else {
-         console.log(`\x1b[32m[Ping] Success! Latency: ${res.latency}ms. Version: ${res.version.name}\x1b[0m`);
+         console.log(`\x1b[32m[Ping] Success! Latency: ${res.latency}ms\x1b[0m`);
       }
    });
 
@@ -43,18 +63,20 @@ function createBot() {
       password: config['bot-account'].password || undefined,
       version: config.server.version,
       auth: config['bot-account'].type === 'microsoft' ? 'microsoft' : 'offline',
-      hideErrors: false,
       checkTimeoutInterval: 60 * 1000
    });
 
    bot.loadPlugin(pathfinder);
 
    bot.on('connect', () => {
-      console.log('\x1b[36m[System] Socket connected. Logging in...\x1b[0m');
+      console.log('\x1b[36m[System] Socket connected.\x1b[0m');
    });
 
    bot.on('login', () => {
-      console.log('\x1b[36m[System] Logged in. Waiting for spawn...\x1b[0m');
+      console.log('\x1b[36m[System] Logged in.\x1b[0m');
+      if (config.utils.telegram.logStatus) {
+         sendTelegram(`🤖 <b>${bot.username}</b> has logged in to <code>${config.server.ip}</code>`);
+      }
    });
 
    bot.on('spawn', () => {
@@ -99,14 +121,23 @@ function createBot() {
    });
 
    bot.on('chat', (username, message) => {
-      if (config.utils['chat-log'] && username !== bot.username) {
+      if (username === bot.username) return;
+      
+      if (config.utils['chat-log']) {
          console.log(`[Chat] <${username}> ${message}`);
+      }
+
+      if (config.utils.telegram.enabled && config.utils.telegram.logChat) {
+         sendTelegram(`💬 <b>${username}</b>: ${message}`);
       }
    });
 
    bot.on('kicked', (reason) => {
       const reasonMsg = typeof reason === 'string' ? reason : (reason.text || JSON.stringify(reason));
       console.log(`\x1b[31m[Kicked] Reason: ${reasonMsg}\x1b[0m`);
+      if (config.utils.telegram.logStatus) {
+         sendTelegram(`⚠️ <b>${bot.username}</b> was kicked!\nReason: <code>${reasonMsg}</code>`);
+      }
    });
 
    bot.on('error', (err) => {
@@ -114,7 +145,7 @@ function createBot() {
    });
 
    bot.on('end', (reason) => {
-      console.log(`\x1b[36m[System] Connection ended (${reason}). Reconnecting...\x1b[0m`);
+      console.log(`\x1b[36m[System] Connection ended (${reason}).\x1b[0m`);
       bot.removeAllListeners();
       if (config.utils['auto-reconnect']) {
          setTimeout(createBot, config.utils['auto-reconnect-delay'] || 5000);
