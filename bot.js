@@ -34,6 +34,16 @@ function createBot() {
 
    bot.loadPlugin(pathfinder);
 
+   console.log(`[System] Attempting to connect to ${config.server.ip}:${config.server.port}...`);
+
+   bot.on('connect', () => {
+      console.log('\x1b[36m[System] Connected to server socket. Logging in...\x1b[0m');
+   });
+
+   bot.on('login', () => {
+      console.log('\x1b[36m[System] Logged in to server. Waiting for spawn...\x1b[0m');
+   });
+
    bot.on('spawn', () => {
       console.log('\x1b[32m[BotLog] Bot spawned in the server\x1b[0m');
       
