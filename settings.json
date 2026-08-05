@@ -47,8 +47,8 @@
     "auto-reconnect-delay": 5000,
     "telegram": {
       "enabled": false,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "chatId": "YOUR_TELEGRAM_CHAT_ID",
+      "token": "8602216884:AAHwE_SUt0jXm2mI-L-Spye2xo8F7lmzoHM",
+      "chatId": "5123554368",
       "logChat": true,
       "logStatus": true
     }
