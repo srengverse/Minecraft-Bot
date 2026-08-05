@@ -130,14 +130,21 @@ function createBot() {
    });
 
    bot.on('error', (err) => {
-      console.log(`\x1b[31m[Error] ${err.message}\x1b[0m`);
+      console.log(`\x1b[31m[Error] ${err.code || 'UNKNOWN'}: ${err.message}\x1b[0m`);
+      if (err.code === 'ECONNREFUSED') {
+         console.log('\x1b[33m[Suggestion] Connection refused. Is the server online and the port correct?\x1b[0m');
+      } else if (err.code === 'ETIMEDOUT') {
+         console.log('\x1b[33m[Suggestion] Connection timed out. The server might be lagging or the network is slow.\x1b[0m');
+      }
    });
 
-   bot.on('end', () => {
-      console.log('\x1b[36m[System] Connection ended\x1b[0m');
+   bot.on('end', (reason) => {
+      console.log(`\x1b[36m[System] Connection ended. Reason: ${reason}\x1b[0m`);
       if (config.utils['auto-reconnect']) {
          const delay = config.utils['auto-reconnect-delay'] || 5000;
          console.log(`[System] Reconnecting in ${delay/1000}s...`);
+         // Clean up old bot instance before reconnecting
+         bot.removeAllListeners();
          setTimeout(createBot, delay);
       }
    });
