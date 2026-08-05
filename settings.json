@@ -48,7 +48,7 @@
     "telegram": {
       "enabled": true,
       "token": "8602216884:AAG_pADfhhN7Q6z6GDbdOq4RqGGKbXznfOc",
-      "chatId": "5123554368",
+      "chatId": "8134594049",
       "logChat": true,
       "logStatus": true
     }
