@@ -4,95 +4,39 @@ const autoeat = require('mineflayer-auto-eat').loader;
 const armorManager = require('mineflayer-armor-manager');
 const express = require('express');
 const http = require('http');
-const https = require('https');
 const { Server } = require('socket.io');
+const TelegramBot = require('node-telegram-bot-api');
 const config = require('./settings.json');
 
-// --- Telegram Logic ---
-function sendTelegram(message) {
-    if (!config.utils.telegram || !config.utils.telegram.enabled) return;
-    const { token, chatId } = config.utils.telegram;
-    if (!token || !chatId || token.includes('YOUR_')) return;
-
-    const data = JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' });
-    const options = {
-        hostname: 'api.telegram.org',
-        port: 443,
-        path: `/bot${token}/sendMessage`,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
-    };
-
-    const req = https.request(options, (res) => {
-        res.on('data', () => {});
-        res.on('end', () => {
-            if (res.statusCode !== 200) console.log(`[Telegram] Error: ${res.statusCode}`);
-        });
-    });
-    req.on('error', (err) => console.log(`[Telegram] Request Error: ${err.message}`));
-    req.write(data);
-    req.end();
+// --- Telegram Setup ---
+let tbot;
+if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.token) {
+    try {
+        tbot = new TelegramBot(config.utils.telegram.token, { polling: true });
+        console.log('\x1b[32m[Telegram] Bot initialized successfully.\x1b[0m');
+    } catch (err) {
+        console.log(`\x1b[31m[Telegram] Initialization Error: ${err.message}\x1b[0m`);
+    }
 }
 
-// --- Web Server & Socket.io ---
+function sendTelegram(message) {
+    if (tbot && config.utils.telegram.chatId) {
+        tbot.sendMessage(config.utils.telegram.chatId, message, { parse_mode: 'HTML' })
+            .catch(err => console.log(`\x1b[31m[Telegram] Send Error: ${err.message}\x1b[0m`));
+    }
+}
+
+// --- Web Server ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
 
 app.get('/', (req, res) => {
-    res.send(`
-        <html>
-            <head>
-                <title>Minecraft Bot Dashboard</title>
-                <style>
-                    body { font-family: sans-serif; background: #121212; color: #e0e0e0; padding: 20px; }
-                    .card { background: #1e1e1e; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #333; }
-                    .status-online { color: #4caf50; }
-                    .status-offline { color: #f44336; }
-                    h1 { color: #fff; }
-                </style>
-            </head>
-            <body>
-                <h1>Minecraft Bot Dashboard</h1>
-                <div class="card">
-                    <h2>Status: <span id="status" class="status-offline">Offline</span></h2>
-                    <p>Username: <span id="username">-</span></p>
-                    <p>Health: <span id="health">-</span></p>
-                    <p>Hunger: <span id="food">-</span></p>
-                    <p>Position: <span id="pos">-</span></p>
-                </div>
-                <div class="card">
-                    <h2>Recent Chat</h2>
-                    <div id="chat-log" style="height: 200px; overflow-y: auto; background: #000; padding: 10px; font-family: monospace;"></div>
-                </div>
-                <script src="/socket.io/socket.io.js"></script>
-                <script>
-                    const socket = io();
-                    socket.on('bot_update', (data) => {
-                        document.getElementById('status').innerText = 'Online';
-                        document.getElementById('status').className = 'status-online';
-                        document.getElementById('username').innerText = data.username;
-                        document.getElementById('health').innerText = data.health;
-                        document.getElementById('food').innerText = data.food;
-                        document.getElementById('pos').innerText = \`X: \${Math.round(data.pos.x)}, Y: \${Math.round(data.pos.y)}, Z: \${Math.round(data.pos.z)}\`;
-                    });
-                    socket.on('chat', (data) => {
-                        const log = document.getElementById('chat-log');
-                        const entry = document.createElement('div');
-                        entry.innerText = \`[\${new Date().toLocaleTimeString()}] <\${data.username}> \${data.message}\`;
-                        log.appendChild(entry);
-                        log.scrollTop = log.scrollHeight;
-                    });
-                </script>
-            </body>
-        </html>
-    `);
+    res.send(`<html><body style="background:#121212;color:#fff;font-family:sans-serif;padding:50px;"><h1>Bot is running!</h1><p>Check Telegram or Socket.io for updates.</p></body></html>`);
 });
 
-server.listen(port, () => {
-    console.log(`[Web] Dashboard available at port ${port}`);
-});
+server.listen(port, () => console.log(`[Web] Dashboard available at port ${port}`));
 
 // --- Bot Logic ---
 let bot;
@@ -163,13 +107,11 @@ function createBot() {
 
     bot.on('health', () => {
         if (bot.health < 10) {
-            console.log(`\x1b[31m[Warning] Low Health: ${bot.health}\x1b[0m`);
             sendTelegram(`⚠️ <b>${bot.username}</b> has low health: <code>${bot.health}</code>`);
         }
     });
 
     bot.on('kicked', (reason) => {
-        console.log(`\x1b[31m[Kicked] Reason: ${reason}\x1b[0m`);
         sendTelegram(`⚠️ <b>${bot.username}</b> was kicked!\nReason: <code>${reason}</code>`);
     });
 
@@ -181,6 +123,43 @@ function createBot() {
         if (config.utils['auto-reconnect']) {
             setTimeout(createBot, config.utils['auto-reconnect-delay'] || 5000);
         }
+    });
+}
+
+// --- Telegram Commands ---
+if (tbot) {
+    tbot.onText(/\/status/, (msg) => {
+        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
+        if (!bot || !bot.entity) {
+            tbot.sendMessage(msg.chat.id, "❌ Bot is currently offline.");
+            return;
+        }
+        const status = `📊 <b>Bot Status</b>\n` +
+                       `👤 Username: ${bot.username}\n` +
+                       `❤️ Health: ${Math.round(bot.health)}/20\n` +
+                       `🍗 Food: ${Math.round(bot.food)}/20\n` +
+                       `📍 Pos: ${Math.round(bot.entity.position.x)}, ${Math.round(bot.entity.position.y)}, ${Math.round(bot.entity.position.z)}`;
+        tbot.sendMessage(msg.chat.id, status, { parse_mode: 'HTML' });
+    });
+
+    tbot.onText(/\/chat (.+)/, (msg, match) => {
+        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
+        const text = match[1];
+        if (bot && bot.entity) {
+            bot.chat(text);
+            tbot.sendMessage(msg.chat.id, `✅ Sent to Minecraft: <i>${text}</i>`, { parse_mode: 'HTML' });
+        } else {
+            tbot.sendMessage(msg.chat.id, "❌ Bot is not connected.");
+        }
+    });
+
+    tbot.onText(/\/help/, (msg) => {
+        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
+        const help = `🎮 <b>Bot Commands</b>\n` +
+                     `/status - Check bot health & position\n` +
+                     `/chat [msg] - Send message to Minecraft server\n` +
+                     `/help - Show this menu`;
+        tbot.sendMessage(msg.chat.id, help, { parse_mode: 'HTML' });
     });
 }
 
