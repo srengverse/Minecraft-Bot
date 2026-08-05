@@ -6,13 +6,15 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const TelegramBot = require('node-telegram-bot-api');
+// Use .default if it exists (for some environments)
+const BotConstructor = typeof TelegramBot === 'function' ? TelegramBot : (TelegramBot.default || TelegramBot);
 const config = require('./settings.json');
 
 // --- Telegram Setup ---
 let tbot;
 if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.token) {
     try {
-        tbot = new TelegramBot(config.utils.telegram.token, { polling: true });
+        tbot = new BotConstructor(config.utils.telegram.token, { polling: true });
         console.log('\x1b[32m[Telegram] Bot initialized successfully.\x1b[0m');
     } catch (err) {
         console.log(`\x1b[31m[Telegram] Initialization Error: ${err.message}\x1b[0m`);
