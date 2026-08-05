@@ -43,19 +43,9 @@ async function sendTelegram(message) {
 
 function createBot() {
    console.log('[System] Initializing bot...');
-   
-   mineflayer.ping({
-      host: config.server.ip,
-      port: config.server.port,
-      version: config.server.version
-   }, (err, res) => {
-      if (err) {
-         console.log(`\x1b[31m[Ping] Error: ${err.message}\x1b[0m`);
-      } else {
-         console.log(`\x1b[32m[Ping] Success! Latency: ${res.latency}ms\x1b[0m`);
-      }
-   });
+   console.log(`[System] Target Server: ${config.server.ip}:${config.server.port} (Version: ${config.server.version})`);
 
+   // Remove problematic mineflayer.ping and use createBot directly
    bot = mineflayer.createBot({
       host: config.server.ip,
       port: config.server.port,
@@ -69,12 +59,12 @@ function createBot() {
    bot.loadPlugin(pathfinder);
 
    bot.on('connect', () => {
-      console.log('\x1b[36m[System] Socket connected.\x1b[0m');
+      console.log('\x1b[36m[System] Socket connected. Logging in...\x1b[0m');
    });
 
    bot.on('login', () => {
-      console.log('\x1b[36m[System] Logged in.\x1b[0m');
-      if (config.utils.telegram.logStatus) {
+      console.log('\x1b[36m[System] Logged in. Waiting for spawn...\x1b[0m');
+      if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.logStatus) {
          sendTelegram(`🤖 <b>${bot.username}</b> has logged in to <code>${config.server.ip}</code>`);
       }
    });
@@ -89,8 +79,10 @@ function createBot() {
       if (config.utils['auto-auth'].enabled) {
          const password = config.utils['auto-auth'].password;
          setTimeout(() => {
-            bot.chat(`/register ${password} ${password}`);
-            bot.chat(`/login ${password}`);
+            if (bot && bot.entity) {
+               bot.chat(`/register ${password} ${password}`);
+               bot.chat(`/login ${password}`);
+            }
          }, 2000);
       }
 
@@ -98,10 +90,12 @@ function createBot() {
          const { messages, repeat, 'repeat-delay': delay } = config.utils['chat-messages'];
          let i = 0;
          if (repeat) {
-            setInterval(() => {
+            const msgInterval = setInterval(() => {
                if (bot && bot.entity) {
                   bot.chat(messages[i]);
                   i = (i + 1) % messages.length;
+               } else {
+                  clearInterval(msgInterval);
                }
             }, delay * 1000);
          }
@@ -114,8 +108,12 @@ function createBot() {
       if (config.utils['anti-afk'].enabled) {
          bot.setControlState('jump', true);
          if (config.utils['anti-afk'].sneak) bot.setControlState('sneak', true);
-         setInterval(() => {
-            if (bot && bot.entity) bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * Math.PI);
+         const lookInterval = setInterval(() => {
+            if (bot && bot.entity) {
+               bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * Math.PI);
+            } else {
+               clearInterval(lookInterval);
+            }
          }, 5000);
       }
    });
@@ -127,7 +125,7 @@ function createBot() {
          console.log(`[Chat] <${username}> ${message}`);
       }
 
-      if (config.utils.telegram.enabled && config.utils.telegram.logChat) {
+      if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.logChat) {
          sendTelegram(`💬 <b>${username}</b>: ${message}`);
       }
    });
@@ -135,7 +133,7 @@ function createBot() {
    bot.on('kicked', (reason) => {
       const reasonMsg = typeof reason === 'string' ? reason : (reason.text || JSON.stringify(reason));
       console.log(`\x1b[31m[Kicked] Reason: ${reasonMsg}\x1b[0m`);
-      if (config.utils.telegram.logStatus) {
+      if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.logStatus) {
          sendTelegram(`⚠️ <b>${bot.username}</b> was kicked!\nReason: <code>${reasonMsg}</code>`);
       }
    });
@@ -145,8 +143,8 @@ function createBot() {
    });
 
    bot.on('end', (reason) => {
-      console.log(`\x1b[36m[System] Connection ended (${reason}).\x1b[0m`);
-      bot.removeAllListeners();
+      console.log(`\x1b[36m[System] Connection ended (${reason}). Reconnecting...\x1b[0m`);
+      if (bot) bot.removeAllListeners();
       if (config.utils['auto-reconnect']) {
          setTimeout(createBot, config.utils['auto-reconnect-delay'] || 5000);
       }
