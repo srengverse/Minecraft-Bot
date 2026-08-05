@@ -1,13 +1,13 @@
 {
   "bot-account": {
-    "username": "sreng",
+    "username": "srengsmp",
     "password": "",
     "type": "offline"
   },
 
   "server": {
-    "ip": "playerteam.aternos.me",
-    "port": 29443,
+    "ip": "Srengkh.aternos.me",
+    "port": 12057,
     "version": "1.12.2"
   },
 
