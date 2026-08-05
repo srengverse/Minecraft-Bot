@@ -2,9 +2,9 @@
   "name": "afk-bot",
   "version": "1.2",
   "description": "Afk bot for minecraft servers.",
-  "main": "index.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "urFate",
