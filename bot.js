@@ -3,7 +3,7 @@ const Movements = require('mineflayer-pathfinder').Movements;
 const pathfinder = require('mineflayer-pathfinder').pathfinder;
 const { GoalBlock } = require('mineflayer-pathfinder').goals;
 const express = require('express');
-const fetch = require('node-fetch');
+const https = require('https');
 const config = require('./settings.json');
 
 const app = express();
@@ -19,33 +19,52 @@ app.listen(port, () => {
 
 let bot;
 
-async function sendTelegram(message) {
+function sendTelegram(message) {
    if (!config.utils.telegram || !config.utils.telegram.enabled) return;
    
    const { token, chatId } = config.utils.telegram;
    if (!token || !chatId || token.includes('YOUR_')) return;
 
-   const url = `https://api.telegram.org/bot${token}/sendMessage`;
-   try {
-      await fetch(url, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-            chat_id: chatId,
-            text: message,
-            parse_mode: 'HTML'
-         })
+   const data = JSON.stringify({
+      chat_id: chatId,
+      text: message,
+      parse_mode: 'HTML'
+   });
+
+   const options = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${token}/sendMessage`,
+      method: 'POST',
+      headers: {
+         'Content-Type': 'application/json',
+         'Content-Length': data.length
+      }
+   };
+
+   const req = https.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => { responseData += chunk; });
+      res.on('end', () => {
+         if (res.statusCode !== 200) {
+            console.log(`\x1b[31m[Telegram] Error Status: ${res.statusCode}\x1b[0m`);
+            console.log(`\x1b[31m[Telegram] Response: ${responseData}\x1b[0m`);
+         }
       });
-   } catch (err) {
-      console.log(`\x1b[31m[Telegram] Error: ${err.message}\x1b[0m`);
-   }
+   });
+
+   req.on('error', (err) => {
+      console.log(`\x1b[31m[Telegram] Request Error: ${err.message}\x1b[0m`);
+   });
+
+   req.write(data);
+   req.end();
 }
 
 function createBot() {
    console.log('[System] Initializing bot...');
    console.log(`[System] Target Server: ${config.server.ip}:${config.server.port} (Version: ${config.server.version})`);
 
-   // Remove problematic mineflayer.ping and use createBot directly
    bot = mineflayer.createBot({
       host: config.server.ip,
       port: config.server.port,
