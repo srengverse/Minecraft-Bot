@@ -2,17 +2,20 @@
   "name": "afk-bot",
   "version": "1.2",
   "description": "Afk bot for minecraft servers.",
-  "main": "bot.js",
+  "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "urFate",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.1",
-
+    "minecraft-data": "latest",
     "mineflayer": "latest",
+    "mineflayer-armor-manager": "^2.0.1",
+    "mineflayer-auto-eat": "^5.0.3",
     "mineflayer-pathfinder": "latest",
-    "minecraft-data": "latest"
+    "socket.io": "^4.8.3"
   }
 }

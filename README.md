@@ -52,3 +52,21 @@ A functional Minecraft AFK bot designed to keep servers (like Aternos) online 24
 ## License
 
 This project is licensed under the MIT License.
+
+## 🚀 Upgraded Features (by Manus AI)
+
+I have upgraded this bot with the following features:
+
+- **Modular Architecture**: Code is now split into `src/` for better maintainability.
+- **Enhanced Web Dashboard**: Real-time status updates (Health, Hunger, Position, Chat) using Socket.io.
+- **Auto-Eat**: Automatically eats food when hungry.
+- **Auto-Armor**: Automatically equips the best armor from inventory.
+- **Health Monitoring**: Sends alerts to Telegram when health is low.
+- **Better Logging**: Improved console logs with colors.
+- **Socket.io Integration**: Real-time communication between the bot and the web dashboard.
+
+### How to start
+```bash
+npm install
+npm start
+```
