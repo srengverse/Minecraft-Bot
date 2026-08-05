@@ -28,7 +28,8 @@ function createBot() {
       username: config['bot-account'].username,
       password: config['bot-account'].password || undefined,
       version: config.server.version,
-      auth: config['bot-account'].type === 'microsoft' ? 'microsoft' : 'offline'
+      auth: config['bot-account'].type === 'microsoft' ? 'microsoft' : 'offline',
+      checkTimeoutInterval: 60 * 1000 // Increase timeout to avoid ghost kicks
    });
 
    bot.loadPlugin(pathfinder);
@@ -111,7 +112,11 @@ function createBot() {
    });
 
    bot.on('kicked', (reason) => {
-      console.log(`\x1b[31m[Kicked] Reason: ${reason}\x1b[0m`);
+      const reasonMsg = typeof reason === 'string' ? reason : (reason.text || JSON.stringify(reason));
+      console.log(`\x1b[31m[Kicked] Reason: ${reasonMsg}\x1b[0m`);
+      if (reasonMsg.includes('Invalid session') || reasonMsg.includes('Online mode')) {
+         console.log('\x1b[33m[Suggestion] Your server might be in Online Mode. Please enable "Cracked" in Aternos settings.\x1b[0m');
+      }
    });
 
    bot.on('error', (err) => {
