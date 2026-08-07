@@ -6,14 +6,31 @@ const pvp = require('mineflayer-pvp').plugin;
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const TelegramBot = require('node-telegram-bot-api');
+const TelegramBotImport = require('node-telegram-bot-api');
 const config = require('./settings.json');
 
-// --- Telegram Setup ---
-const TelegramBotImport = require('node-telegram-bot-api');
+// --- Global Variables & State ---
+let bot;
+let tbot;
+let pvpEnabled = true;
+let botIntervals = [];
+let reconnectTimeout = null;
+
 const BotConstructor = typeof TelegramBotImport === 'function' ? TelegramBotImport : (TelegramBotImport.default || TelegramBotImport);
 
-let tbot;
+// --- Utility Functions ---
+function clearAllIntervals() {
+    botIntervals.forEach(clearInterval);
+    botIntervals = [];
+}
+
+function addInterval(fn, ms) {
+    const id = setInterval(fn, ms);
+    botIntervals.push(id);
+    return id;
+}
+
+// --- Telegram Setup ---
 if (config.utils.telegram && config.utils.telegram.enabled && config.utils.telegram.token) {
     try {
         tbot = new BotConstructor(config.utils.telegram.token, { polling: true });
@@ -46,39 +63,43 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Bot is running!'));
+
+app.get('/', (req, res) => {
+    res.send(`
+        <html>
+            <head><title>Minecraft Bot Dashboard</title></head>
+            <body style="background:#121212;color:#fff;font-family:sans-serif;text-align:center;padding-top:50px;">
+                <h1>Bot is Live!</h1>
+                <p>Status: ${bot && bot.entity ? '<span style="color:#4caf50">Online</span>' : '<span style="color:#f44336">Offline</span>'}</p>
+                <p>Check your Telegram for full control.</p>
+            </body>
+        </html>
+    `);
+});
+
 server.listen(port, () => console.log(`[Web] Dashboard available at port ${port}`));
 
-// --- Bot Logic ---
-let bot;
-let pvpEnabled = true;
-
+// --- Combat & Inventory Utils ---
 function equipBestWeapon() {
     if (!bot || !bot.inventory) return;
-    const items = bot.inventory.items();
-    let bestWeapon = null;
-    let maxDamage = 0;
-
     const weapons = {
         'netherite_sword': 8, 'diamond_sword': 7, 'iron_sword': 6, 'stone_sword': 5, 'golden_sword': 4, 'wooden_sword': 4,
         'netherite_axe': 10, 'diamond_axe': 9, 'iron_axe': 9, 'stone_axe': 9, 'golden_axe': 7, 'wooden_axe': 7
     };
-
-    for (const item of items) {
-        if (weapons[item.name]) {
-            if (weapons[item.name] > maxDamage) {
-                maxDamage = weapons[item.name];
-                bestWeapon = item;
-            }
-        }
-    }
-
-    if (bestWeapon) {
-        bot.equip(bestWeapon, 'hand').catch(() => {});
-    }
+    const best = bot.inventory.items()
+        .filter(item => weapons[item.name])
+        .sort((a, b) => weapons[b.name] - weapons[a.name])[0];
+    
+    if (best) bot.equip(best, 'hand').catch(() => {});
 }
 
+// --- Core Bot Creation ---
 function createBot() {
+    if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+    }
+
     console.log('[System] Initializing bot...');
     bot = mineflayer.createBot({
         host: config.server.ip,
@@ -102,102 +123,142 @@ function createBot() {
 
     bot.on('spawn', () => {
         console.log('\x1b[32m[BotLog] Bot spawned!\x1b[0m');
+        clearAllIntervals(); // Clear old intervals to prevent memory leaks
+
         const mcData = require('minecraft-data')(bot.version);
         const defaultMove = new Movements(bot, mcData);
         bot.pathfinder.setMovements(defaultMove);
 
-        // Anti-AFK
-        if (config.utils['anti-afk'].enabled) {
+        // Auto-Auth
+        if (config.utils['auto-auth'] && config.utils['auto-auth'].enabled) {
+            const pass = config.utils['auto-auth'].password;
+            setTimeout(() => {
+                if (bot && bot.entity) {
+                    bot.chat(`/register ${pass} ${pass}`);
+                    bot.chat(`/login ${pass}`);
+                }
+            }, 3000);
+        }
+
+        // Anti-AFK Logic
+        if (config.utils['anti-afk'] && config.utils['anti-afk'].enabled) {
             bot.setControlState('jump', true);
-            setInterval(() => {
+            addInterval(() => {
                 if (bot && bot.entity) bot.look(Math.random() * Math.PI * 2, (Math.random() - 0.5) * Math.PI);
             }, 5000);
         }
 
-        // Auto-Weapon & Armor Check
-        setInterval(() => {
-            if (bot && bot.entity) equipBestWeapon();
+        // Periodic Checks (Weapon, Armor, Web Update)
+        addInterval(() => {
+            if (bot && bot.entity) {
+                equipBestWeapon();
+                io.emit('bot_update', {
+                    username: bot.username,
+                    health: bot.health,
+                    food: bot.food,
+                    pos: bot.entity.position
+                });
+            }
         }, 10000);
+
+        // Auto-Chat Messages
+        if (config.utils['chat-messages'] && config.utils['chat-messages'].enabled) {
+            const { messages, 'repeat-delay': delay } = config.utils['chat-messages'];
+            let msgIdx = 0;
+            addInterval(() => {
+                if (bot && bot.entity && messages.length > 0) {
+                    bot.chat(messages[msgIdx]);
+                    msgIdx = (msgIdx + 1) % messages.length;
+                }
+            }, delay * 1000);
+        }
     });
 
-    // --- Combat Logic (Auto-Attack) ---
+    // --- Events ---
     bot.on('entityHurt', (entity) => {
-        if (!pvpEnabled) return;
-        if (entity !== bot.entity) return;
-
-        // Find who attacked me
-        const attacker = bot.nearestEntity(e => (e.type === 'player' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 5);
+        if (!pvpEnabled || entity !== bot.entity) return;
+        const attacker = bot.nearestEntity(e => (e.type === 'player' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 6);
         if (attacker) {
-            console.log(`\x1b[31m[Combat] Attacking back: ${attacker.username || attacker.name}\x1b[0m`);
+            console.log(`\x1b[31m[Combat] Counter-attacking: ${attacker.username || attacker.name}\x1b[0m`);
             equipBestWeapon();
             bot.pvp.attack(attacker);
-            sendTelegram(`⚔️ <b>Defense Active!</b> Attacking back: <code>${attacker.username || attacker.name}</code>`);
+            sendTelegram(`⚔️ <b>Combat!</b> Defending against <code>${attacker.username || attacker.name}</code>`);
         }
     });
 
     bot.on('chat', (username, message) => {
         if (username === bot.username) return;
-        io.emit('chat', { username, message });
+        if (config.utils['chat-log']) console.log(`[Chat] <${username}> ${message}`);
         if (config.utils.telegram.enabled && config.utils.telegram.logChat) {
             sendTelegram(`💬 <b>${username}</b>: ${message}`);
         }
     });
 
     bot.on('health', () => {
-        if (bot.health < 10) {
-            sendTelegram(`⚠️ <b>Low Health!</b> HP: <code>${Math.round(bot.health)}</code>`);
-        }
+        if (bot.health < 8) sendTelegram(`⚠️ <b>Emergency!</b> HP is very low: <code>${Math.round(bot.health)}</code>`);
+    });
+
+    bot.on('error', (err) => console.log(`\x1b[31m[Error] ${err.message}\x1b[0m`));
+
+    bot.on('kicked', (reason) => {
+        const msg = typeof reason === 'string' ? reason : JSON.stringify(reason);
+        console.log(`\x1b[31m[Kicked] Reason: ${msg}\x1b[0m`);
+        sendTelegram(`⚠️ <b>Kicked!</b> Reason: <code>${msg}</code>`);
     });
 
     bot.on('end', (reason) => {
-        console.log(`\x1b[36m[System] Connection ended (${reason}). Reconnecting...\x1b[0m`);
+        console.log(`\x1b[36m[System] Disconnected (${reason}).\x1b[0m`);
+        clearAllIntervals();
         if (bot) bot.removeAllListeners();
-        if (config.utils['auto-reconnect']) setTimeout(createBot, 5000);
+        
+        if (config.utils['auto-reconnect']) {
+            const delay = config.utils['auto-reconnect-delay'] || 5000;
+            console.log(`[System] Reconnecting in ${delay/1000}s...`);
+            reconnectTimeout = setTimeout(createBot, delay);
+        }
     });
 }
 
-// --- Telegram Commands & Callbacks ---
+// --- Telegram Controller ---
 if (tbot) {
-    tbot.on('callback_query', (query) => {
-        const chatId = query.message.chat.id;
-        if (chatId.toString() !== config.utils.telegram.chatId.toString()) return;
+    const isOwner = (id) => id.toString() === config.utils.telegram.chatId.toString();
 
-        if (query.data === 'status') {
+    tbot.on('callback_query', (query) => {
+        if (!isOwner(query.from.id)) return;
+        const data = query.data;
+
+        if (data === 'status') {
             if (!bot || !bot.entity) {
-                tbot.sendMessage(chatId, "❌ Bot is offline.");
+                tbot.sendMessage(query.message.chat.id, "❌ Bot is currently offline.");
             } else {
                 const status = `📊 <b>Status</b>\n❤️ HP: ${Math.round(bot.health)}\n🍗 Food: ${Math.round(bot.food)}\n📍 Pos: ${Math.round(bot.entity.position.x)}, ${Math.round(bot.entity.position.y)}, ${Math.round(bot.entity.position.z)}\n⚔️ PvP: ${pvpEnabled ? 'ON' : 'OFF'}`;
-                tbot.sendMessage(chatId, status, { parse_mode: 'HTML', ...mainKeyboard });
+                tbot.sendMessage(query.message.chat.id, status, { parse_mode: 'HTML', ...mainKeyboard });
             }
-        } else if (query.data === 'toggle_pvp') {
+        } else if (data === 'toggle_pvp') {
             pvpEnabled = !pvpEnabled;
             if (!pvpEnabled && bot.pvp) bot.pvp.stop();
-            tbot.sendMessage(chatId, `⚔️ PvP Mode is now: <b>${pvpEnabled ? 'ENABLED' : 'DISABLED'}</b>`, { parse_mode: 'HTML', ...mainKeyboard });
-        } else if (query.data === 'help') {
-            const help = `🎮 <b>Menu</b>\n/status - Status\n/chat [msg] - Send message\n/pvp [on/off] - Toggle Combat`;
-            tbot.sendMessage(chatId, help, { parse_mode: 'HTML', ...mainKeyboard });
+            tbot.sendMessage(query.message.chat.id, `⚔️ PvP Mode: <b>${pvpEnabled ? 'ENABLED' : 'DISABLED'}</b>`, { parse_mode: 'HTML', ...mainKeyboard });
+        } else if (data === 'help') {
+            const help = `🎮 <b>Control Menu</b>\n/status - Check bot\n/chat [msg] - Speak in game\n/reconnect - Force restart bot`;
+            tbot.sendMessage(query.message.chat.id, help, { parse_mode: 'HTML', ...mainKeyboard });
         }
         tbot.answerCallbackQuery(query.id);
     });
 
-    tbot.onText(/\/status/, (msg) => {
-        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
-        sendTelegram('📊 Checking status...', mainKeyboard);
-    });
-
     tbot.onText(/\/chat (.+)/, (msg, match) => {
-        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
+        if (!isOwner(msg.chat.id)) return;
         if (bot && bot.entity) {
             bot.chat(match[1]);
-            tbot.sendMessage(msg.chat.id, "✅ Message sent!");
+            tbot.sendMessage(msg.chat.id, "✅ Sent.");
         }
     });
 
-    tbot.onText(/\/pvp (on|off)/, (msg, match) => {
-        if (msg.chat.id.toString() !== config.utils.telegram.chatId.toString()) return;
-        pvpEnabled = match[1] === 'on';
-        tbot.sendMessage(msg.chat.id, `⚔️ PvP Mode: ${pvpEnabled ? 'ON' : 'OFF'}`);
+    tbot.onText(/\/reconnect/, (msg) => {
+        if (!isOwner(msg.chat.id)) return;
+        tbot.sendMessage(msg.chat.id, "🔄 Restarting bot...");
+        if (bot) bot.quit();
     });
 }
 
+// --- Start ---
 createBot();
